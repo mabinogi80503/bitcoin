@@ -2088,12 +2088,18 @@ bool CChainState::ConnectBlock(const CBlock& block, CValidationState& state, CBl
     blockundo.vtxundo.reserve(block.vtx.size() - 1);
     std::vector<PrecomputedTransactionData> txdata;
     txdata.reserve(block.vtx.size()); // Required so that pointers to individual PrecomputedTransactionData don't get invalidated
+
+    int64_t loop1 = 0;
+    int64_t loop2 = 0;
+    int64_t loop3 = 0;
+
     for (unsigned int i = 0; i < block.vtx.size(); i++)
     {
         const CTransaction &tx = *(block.vtx[i]);
 
         nInputs += tx.vin.size();
 
+        int64_t ttt1 = GetTimeMicros();
         if (!tx.IsCoinBase())
         {
             CAmount txfee = 0;
@@ -2127,6 +2133,9 @@ bool CChainState::ConnectBlock(const CBlock& block, CValidationState& state, CBl
                                  REJECT_INVALID, "bad-txns-nonfinal");
             }
         }
+        int64_t ttt2 = GetTimeMicros();
+
+        loop1 += ttt2 - ttt1;
 
         // GetTransactionSigOpCost counts 3 types of sigops:
         // * legacy (always)
@@ -2158,15 +2167,22 @@ bool CChainState::ConnectBlock(const CBlock& block, CValidationState& state, CBl
             }
             control.Add(vChecks);
         }
+        ttt1 = GetTimeMicros();
+
+        loop2 += ttt1 - ttt2;
 
         CTxUndo undoDummy;
         if (i > 0) {
             blockundo.vtxundo.push_back(CTxUndo());
         }
         UpdateCoins(tx, view, i == 0 ? undoDummy : blockundo.vtxundo.back(), pindex->nHeight);
+        ttt2 = GetTimeMicros();
+        loop3 += ttt2 - ttt1;
     }
     int64_t nTime3 = GetTimeMicros(); nTimeConnect += nTime3 - nTime2;
     LogPrint(BCLog::BENCH, "      - Connect %u transactions: %.2fms (%.3fms/tx, %.3fms/txin) [%.2fs (%.2fms/blk)]\n", (unsigned)block.vtx.size(), MILLI * (nTime3 - nTime2), MILLI * (nTime3 - nTime2) / block.vtx.size(), nInputs <= 1 ? 0 : MILLI * (nTime3 - nTime2) / (nInputs-1), nTimeConnect * MICRO, nTimeConnect * MILLI / nBlocksTotal);
+
+    LogPrint(BCLog::BENCH, "      - Loop1: %.2fms, Loop2: %.2fms, Loop3: %.2fms\n", MILLI * loop1, MILLI * loop2, MILLI * loop3);
 
     CAmount blockReward = nFees + GetBlockSubsidy(pindex->nHeight, chainparams.GetConsensus());
     if (block.vtx[0]->GetValueOut() > blockReward)
