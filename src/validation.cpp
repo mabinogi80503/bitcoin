@@ -2092,6 +2092,11 @@ bool CChainState::ConnectBlock(const CBlock& block, CValidationState& state, CBl
     int64_t loop1 = 0;
     int64_t loop2 = 0;
     int64_t loop3 = 0;
+    int64_t inner_t1 = 0;
+    int64_t inner_t2 = 0;
+    int64_t inner_t3 = 0;
+    int64_t inner_t4 = 0;
+    int64_t inner_tmp1 = 0, inner_tmp2 = 0;
 
     for (unsigned int i = 0; i < block.vtx.size(); i++)
     {
@@ -2103,6 +2108,8 @@ bool CChainState::ConnectBlock(const CBlock& block, CValidationState& state, CBl
         if (!tx.IsCoinBase())
         {
             CAmount txfee = 0;
+
+	    inner_tmp1 = GetTimeMicros();
             if (!Consensus::CheckTxInputs(tx, state, view, pindex->nHeight, txfee)) {
                 if (!IsBlockReason(state.GetReason())) {
                     // CheckTxInputs may return MISSING_INPUTS or
@@ -2114,11 +2121,16 @@ bool CChainState::ConnectBlock(const CBlock& block, CValidationState& state, CBl
                 }
                 return error("%s: Consensus::CheckTxInputs: %s, %s", __func__, tx.GetHash().ToString(), FormatStateMessage(state));
             }
+	    inner_tmp2 = GetTimeMicros();
+	    inner_t1 += inner_tmp2 - inner_tmp1;
+
             nFees += txfee;
             if (!MoneyRange(nFees)) {
                 return state.Invalid(ValidationInvalidReason::CONSENSUS, error("%s: accumulated fee in the block out of range.", __func__),
                                  REJECT_INVALID, "bad-txns-accumulated-fee-outofrange");
             }
+	    inner_tmp1 = GetTimeMicros();
+	    inner_t2 += inner_tmp1 - inner_tmp2;
 
             // Check that transaction is BIP68 final
             // BIP68 lock checks (as opposed to nLockTime checks) must
@@ -2127,11 +2139,15 @@ bool CChainState::ConnectBlock(const CBlock& block, CValidationState& state, CBl
             for (size_t j = 0; j < tx.vin.size(); j++) {
                 prevheights[j] = view.AccessCoin(tx.vin[j].prevout).nHeight;
             }
+	    inner_tmp2 = GetTimeMicros();
+	    inner_t3 += inner_tmp2 - inner_tmp1;
 
             if (!SequenceLocks(tx, nLockTimeFlags, &prevheights, *pindex)) {
                 return state.Invalid(ValidationInvalidReason::CONSENSUS, error("%s: contains a non-BIP68-final transaction", __func__),
                                  REJECT_INVALID, "bad-txns-nonfinal");
             }
+
+	    inner_t4 += GetTimeMicros() - inner_tmp2;
         }
         int64_t ttt2 = GetTimeMicros();
 
@@ -2182,7 +2198,8 @@ bool CChainState::ConnectBlock(const CBlock& block, CValidationState& state, CBl
     int64_t nTime3 = GetTimeMicros(); nTimeConnect += nTime3 - nTime2;
     LogPrint(BCLog::BENCH, "      - Connect %u transactions: %.2fms (%.3fms/tx, %.3fms/txin) [%.2fs (%.2fms/blk)]\n", (unsigned)block.vtx.size(), MILLI * (nTime3 - nTime2), MILLI * (nTime3 - nTime2) / block.vtx.size(), nInputs <= 1 ? 0 : MILLI * (nTime3 - nTime2) / (nInputs-1), nTimeConnect * MICRO, nTimeConnect * MILLI / nBlocksTotal);
 
-    LogPrint(BCLog::BENCH, "      - Loop1: %.2fms, Loop2: %.2fms, Loop3: %.2fms\n", MILLI * loop1, MILLI * loop2, MILLI * loop3);
+    LogPrint(BCLog::BENCH, "        - Loop1: %.2fms, Loop2: %.2fms, Loop3: %.2fms\n", MILLI * loop1, MILLI * loop2, MILLI * loop3);
+    LogPrint(BCLog::BENCH, "        - t1: %.2fms, t2: %.2fms, t3: %.2fms, t4: %.2fms\n", MILLI * inner_t1, MILLI * inner_t2, MILLI * inner_t3, MILLI * inner_t4);
 
     CAmount blockReward = nFees + GetBlockSubsidy(pindex->nHeight, chainparams.GetConsensus());
     if (block.vtx[0]->GetValueOut() > blockReward)
